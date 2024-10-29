@@ -1,11 +1,15 @@
-import redisClient, { logAllQueues } from '../utils/redisClient';
-import { getSocket } from '../utils/socket';
-import { SOCKET_EVENTS } from '../constants/socketEventNames';
-import MatchingEventModel from '../models/MatchingEvent';
-import Room from '../models/RoomSchema';
+import redisClient, { logAllQueues } from "../utils/redisClient";
+import { getSocket } from "../utils/socket";
+import { SOCKET_EVENTS } from "../constants/socketEventNames";
+import MatchingEventModel from "../models/MatchingEvent";
+import Room from "../models/RoomSchema";
+import { MATCH_TOPIC, producer } from "../utils/kafkaClient";
+import { EachMessagePayload } from "kafkajs";
 
 const MATCHING_INTERVAL = parseInt(process.env.MATCHING_INTERVAL || "3000");
-const RELAXATION_INTERVAL = parseInt(process.env.RELAXATION_INTERVAL || "10000");
+const RELAXATION_INTERVAL = parseInt(
+    process.env.RELAXATION_INTERVAL || "10000"
+);
 const MATCH_TIMEOUT = parseInt(process.env.MATCH_TIMEOUT || "30000");
 
 /**
@@ -17,7 +21,7 @@ export async function matchingWorker() {
         try {
             const now = Date.now();
 
-            const userKeys = await redisClient.zRange('matching_queue', 0, -1);
+            const userKeys = await redisClient.zRange("matching_queue", 0, -1);
 
             const users = await Promise.all(
                 userKeys.map(async (userKey) => {
@@ -26,38 +30,65 @@ export async function matchingWorker() {
                 })
             );
 
-            const validUsers = users.filter((u) => u !== null) as Array<{ userKey: string; userData: any }>;
-            validUsers.sort((a, b) => parseInt(a.userData.requestedAt, 10) - parseInt(b.userData.requestedAt, 10));
+            const validUsers = users.filter((u) => u !== null) as Array<{
+                userKey: string;
+                userData: any;
+            }>;
+            validUsers.sort(
+                (a, b) =>
+                    parseInt(a.userData.requestedAt, 10) -
+                    parseInt(b.userData.requestedAt, 10)
+            );
 
             const matchedUsers = new Set<string>();
 
             for (let i = 0; i < validUsers.length; i++) {
-                const { userKey: userKey1, userData: userData1 } = validUsers[i];
+                const { userKey: userKey1, userData: userData1 } =
+                    validUsers[i];
 
                 if (matchedUsers.has(userKey1)) continue;
 
-                const isInQueue1 = await redisClient.zRank('matching_queue', userKey1);
+                const isInQueue1 = await redisClient.zRank(
+                    "matching_queue",
+                    userKey1
+                );
                 if (isInQueue1 === null) continue;
 
                 const relaxationLevel1 = getRelaxationLevel(userData1);
 
                 for (let j = i + 1; j < validUsers.length; j++) {
-                    const { userKey: userKey2, userData: userData2 } = validUsers[j];
+                    const { userKey: userKey2, userData: userData2 } =
+                        validUsers[j];
 
                     if (matchedUsers.has(userKey2)) continue;
 
-                    const isInQueue2 = await redisClient.zRank('matching_queue', userKey2);
+                    const isInQueue2 = await redisClient.zRank(
+                        "matching_queue",
+                        userKey2
+                    );
                     if (isInQueue2 === null) continue;
 
                     const relaxationLevel2 = getRelaxationLevel(userData2);
 
-                    if (canUsersMatch(userData1, userData2, relaxationLevel1, relaxationLevel2)) {
+                    if (
+                        canUsersMatch(
+                            userData1,
+                            userData2,
+                            relaxationLevel1,
+                            relaxationLevel2
+                        )
+                    ) {
                         matchedUsers.add(userKey1);
                         matchedUsers.add(userKey2);
 
-                        await redisClient.zRem('matching_queue', userKey1);
-                        await redisClient.zRem('matching_queue', userKey2);
-                        console.log('Match created between:', { userKey1, userData1, userKey2, userData2 });
+                        await redisClient.zRem("matching_queue", userKey1);
+                        await redisClient.zRem("matching_queue", userKey2);
+                        console.log("Match created between:", {
+                            userKey1,
+                            userData1,
+                            userKey2,
+                            userData2,
+                        });
 
                         await handleMatch(userData1, userData2).then(() => {
                             console.log("After match, match queue state:");
@@ -71,7 +102,7 @@ export async function matchingWorker() {
 
             await handleTimeouts(validUsers, now);
         } catch (error) {
-            console.error('Error in matching worker:', error);
+            console.error("Error in matching worker:", error);
         }
     }, MATCHING_INTERVAL);
 }
@@ -103,7 +134,12 @@ function getRelaxationLevel(userData: any): number {
  * @param relaxationLevel2 - Relaxation level of the second user.
  * @returns True if users can be matched, else false.
  */
-function canUsersMatch(user1: any, user2: any, relaxationLevel1: number, relaxationLevel2: number): boolean {
+function canUsersMatch(
+    user1: any,
+    user2: any,
+    relaxationLevel1: number,
+    relaxationLevel2: number
+): boolean {
     let satisfied = false;
 
     if (relaxationLevel1 < 0 || relaxationLevel1 > 2) return false;
@@ -127,16 +163,25 @@ function canUsersMatch(user1: any, user2: any, relaxationLevel1: number, relaxat
  * @param userData - The user data object.
  * @returns An object with relaxed category and difficulty.
  */
-function getRelaxedCriteria(relaxationLevel: number, userData: any): { category: string; difficulty: string } {
+function getRelaxedCriteria(
+    relaxationLevel: number,
+    userData: any
+): { category: string; difficulty: string } {
     switch (relaxationLevel) {
         case 0:
-            return { category: userData.category, difficulty: userData.difficulty };
+            return {
+                category: userData.category,
+                difficulty: userData.difficulty,
+            };
         case 1:
-            return { category: userData.category, difficulty: 'Any' };
+            return { category: userData.category, difficulty: "Any" };
         case 2:
-            return { category: 'Any', difficulty: userData.difficulty };
+            return { category: "Any", difficulty: userData.difficulty };
         default:
-            return { category: userData.category, difficulty: userData.difficulty };
+            return {
+                category: userData.category,
+                difficulty: userData.difficulty,
+            };
     }
 }
 
@@ -146,30 +191,36 @@ function getRelaxedCriteria(relaxationLevel: number, userData: any): { category:
  * @param relaxedCriteria - The relaxed criteria to satisfy.
  * @returns True if satisfied, else false.
  */
-function isCriteriaSatisfied(user: any, relaxedCriteria: { category: string; difficulty: string }): boolean {
-    const categoryMatch = relaxedCriteria.category === 'Any' || user.category === relaxedCriteria.category;
-    const difficultyMatch = relaxedCriteria.difficulty === 'Any' || user.difficulty === relaxedCriteria.difficulty;
+function isCriteriaSatisfied(
+    user: any,
+    relaxedCriteria: { category: string; difficulty: string }
+): boolean {
+    const categoryMatch =
+        relaxedCriteria.category === "Any" ||
+        user.category === relaxedCriteria.category;
+    const difficultyMatch =
+        relaxedCriteria.difficulty === "Any" ||
+        user.difficulty === relaxedCriteria.difficulty;
     return categoryMatch && difficultyMatch;
 }
 
+/*
 async function createRoom(user1: any, user2: any) {
     const newRoom = new Room({
-        participants: [
-            { userId: user1.userId },
-            { userId: user2.userId }
-        ],
-        category: user1.category || user2.category || 'Any',
-        difficulty: user1.difficulty || user2.difficulty || 'Any',
+        participants: [{ userId: user1.userId }, { userId: user2.userId }],
+        category: user1.category || user2.category || "Any",
+        difficulty: user1.difficulty || user2.difficulty || "Any",
     });
 
     const savedRoom = await newRoom.save();
     return savedRoom._id.toString();
 }
-
+*/
 
 /**
  * Handles the match between two users.
- * Emits MATCH_FOUND event to both users and logs the match in MongoDB.
+ * Emits event to Kafka listeners (Question-service and Collaboration-service)and logs the match in MongoDB.
+ * Also, adds an intial room object to Redis, without room ID and question IDs.
  * @param user1 - Data of the first user.
  * @param user2 - Data of the second user.
  */
@@ -178,19 +229,45 @@ async function handleMatch(user1: any, user2: any) {
         console.log("Match found, match queue state before handling:");
         await logAllQueues();
 
-        console.log("Before adding match to message queue, message queue state:");
-        const messagesBefore = await redisClient.xRange('match_events', '-', '+', { COUNT: 10 });
+        console.log(
+            "Before adding match to message queue, message queue state:"
+        );
+        const messagesBefore = await redisClient.xRange(
+            "match_events",
+            "-",
+            "+",
+            { COUNT: 10 }
+        );
         console.log(messagesBefore);
 
+        const category = user1.category || user2.category || "Any";
+        const difficulty = user1.difficulty || user2.difficulty || "Any";
+
         const matchingEvent = new MatchingEventModel({
-            category: user1.category || user2.category || 'Any',
-            difficulty: user1.difficulty || user2.difficulty || 'Any',
+            category: category,
+            difficulty: difficulty,
         });
         const savedEvent = await matchingEvent.save();
 
-        const roomId = await createRoom(user1, user2);
+        const matchEvent = {
+            user1: { userId: user1.userId, socketId: user1.socketId },
+            user2: { userId: user2.userId, socketId: user2.socketId },
+            category: category,
+            difficulty: difficulty,
+            matchId: savedEvent._id.toString(),
+        };
 
-        const matchMessage = {
+        await producer.send({
+            topic: MATCH_TOPIC,
+            messages: [
+                {
+                    key: matchEvent.matchId,
+                    value: JSON.stringify(matchEvent),
+                },
+            ],
+        });
+
+        const roomObject = {
             user1: JSON.stringify({
                 userId: user1.userId,
                 socketId: user1.socketId,
@@ -203,19 +280,21 @@ async function handleMatch(user1: any, user2: any) {
                 category: user2.category,
                 difficulty: user2.difficulty,
             }),
-            roomId: roomId,
             matchId: savedEvent._id.toString(),
         };
 
-        await redisClient.xAdd('match_events', '*', matchMessage);
+        await redisClient.hSet(
+            roomObject.matchId,
+            "data",
+            JSON.stringify(roomObject)
+        );
 
         console.log("Match found, match queue after handling:");
         await logAllQueues();
     } catch (error) {
-        console.error('Error in handleMatch:', error);
+        console.error("Error in handleMatch:", error);
     }
 }
-
 
 /**
  * Handles timeout scenarios by emitting MATCH_FAILED events to users
@@ -223,7 +302,10 @@ async function handleMatch(user1: any, user2: any) {
  * @param validUsers - Array of valid user objects currently in the queue.
  * @param currentTime - The current timestamp.
  */
-async function handleTimeouts(validUsers: Array<{ userKey: string; userData: any }>, currentTime: number) {
+async function handleTimeouts(
+    validUsers: Array<{ userKey: string; userData: any }>,
+    currentTime: number
+) {
     const io = getSocket();
 
     for (const { userKey, userData } of validUsers) {
@@ -238,12 +320,105 @@ async function handleTimeouts(validUsers: Array<{ userKey: string; userData: any
                 socket.emit(SOCKET_EVENTS.MATCH_FAILED, {
                     message: "Match timed out. Please try again.",
                 });
-                console.log(`Emitted MATCH_FAILED to ${socketId} due to timeout.`);
+                console.log(
+                    `Emitted MATCH_FAILED to ${socketId} due to timeout.`
+                );
 
-                await redisClient.zRem('matching_queue', userKey);
+                await redisClient.zRem("matching_queue", userKey);
                 await redisClient.del(userKey);
                 console.log(`Stale user ${socketId} has been cleaned up.`);
             }
         }
+    }
+}
+
+/**
+ * Updates the room ID in the Redis store with the ID created by Collaboration-service.
+ * @param message - The Kafka message payload from Collaboration-service.
+ */
+export async function handleCollabMessage(message: EachMessagePayload) {
+    const roomId = message.message.value?.toString();
+    const matchId = message.message.key?.toString();
+
+    if (!matchId) {
+        console.error("Match ID is undefined");
+        return;
+    }
+
+    const data = await redisClient.hGet(matchId, "data");
+
+    if (!data) {
+        console.error(`No data found for matchId ${matchId}`);
+        return;
+    }
+
+    const roomObject = JSON.parse(data);
+
+    roomObject.roomId = roomId;
+
+    await redisClient.hSet(matchId, "data", JSON.stringify(roomObject));
+
+    emitMatchEvent(matchId);
+}
+
+/**
+ * Updates the Question ID in the Redis store with the ID created by Question-service.
+ * @param message - The Kafka message payload from Question-service.
+ */
+export async function handleQuestionMessage(message: EachMessagePayload) {
+    const questionId = message.message.value?.toString();
+    const matchId = message.message.key?.toString();
+
+    if (!matchId) {
+        console.error("Match ID is undefined");
+        return;
+    }
+
+    const data = await redisClient.hGet(matchId, "data");
+
+    if (!data) {
+        console.error(`No data found for matchId ${matchId}`);
+        return;
+    }
+
+    const roomObject = JSON.parse(data);
+
+    roomObject.questionId = questionId;
+
+    await redisClient.hSet(matchId, "data", JSON.stringify(roomObject));
+
+    emitMatchEvent(matchId);
+}
+
+/**
+ * Emits a match event to the controller to notify the clients if roomId and questionId are obtained from collab and question services.
+ * Saves complete details of the match in the Room collection.
+ * @param matchId - The match ID.
+ */
+export async function emitMatchEvent(matchId: string) {
+    const data = await redisClient.hGet(matchId, "data");
+
+    if (!data) {
+        console.error(`No data found for matchId ${matchId}`);
+        return;
+    }
+
+    const roomObject = JSON.parse(data);
+
+    if (roomObject.questionId && roomObject.roomId) {
+        const newRoom = new Room({
+            participants: [
+                { userId: roomObject.user1.userId },
+                { userId: roomObject.user2.userId },
+            ],
+            category: roomObject.category,
+            difficulty: roomObject.difficulty,
+            roomId: roomObject.roomId,
+            questionId: roomObject.questionId,
+        });
+
+        await newRoom.save();
+
+        await redisClient.xAdd("match_events", "*", { data });
     }
 }

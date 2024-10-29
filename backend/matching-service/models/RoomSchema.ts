@@ -4,6 +4,8 @@ const roomSchema = new mongoose.Schema({
     participants: [{ userId: String }],
     category: { type: String, default: 'Any' },
     difficulty: { type: String, default: 'Any' },
+    roomId: { type: String, required: true },
+    questionId : { type: String, required: true },
     createdAt: { type: Date, default: Date.now }
 });
 
