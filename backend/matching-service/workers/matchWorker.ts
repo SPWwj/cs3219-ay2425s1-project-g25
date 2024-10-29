@@ -204,19 +204,6 @@ function isCriteriaSatisfied(
     return categoryMatch && difficultyMatch;
 }
 
-/*
-async function createRoom(user1: any, user2: any) {
-    const newRoom = new Room({
-        participants: [{ userId: user1.userId }, { userId: user2.userId }],
-        category: user1.category || user2.category || "Any",
-        difficulty: user1.difficulty || user2.difficulty || "Any",
-    });
-
-    const savedRoom = await newRoom.save();
-    return savedRoom._id.toString();
-}
-*/
-
 /**
  * Handles the match between two users.
  * Emits event to Kafka listeners (Question-service and Collaboration-service)and logs the match in MongoDB.
