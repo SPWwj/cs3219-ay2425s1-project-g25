@@ -3,6 +3,8 @@ import Session from '../models/Session'; // Import the session model
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { getSocket } from '../utils/socket'; // Function to get socket.io instance
+import { EachMessagePayload } from 'kafkajs';
+import { COLLAB_TOPIC, producer } from '../utils/kafkaClient';
 
 export const handleMatchNotification = async (req, res) => {
     const { user1, user2, roomId } = req.body;
@@ -48,3 +50,34 @@ export const handleMatchNotification = async (req, res) => {
         res.status(500).json({ message: "Failed to process match notification." });
     }
 };
+
+/**
+ * Process the message from the Kafka topic and create a new session.
+ * Emits a Kafka message back to the matching service with the session ID.
+ * @param message - Kafka message payload
+ */
+export async function createSession(message: EachMessagePayload) {
+    const matchId = message.message.key?.toString();
+
+    if (!matchId) {
+        console.error("No match ID found in message.");
+        return;
+    }
+
+    // TODO: Perform create session logic
+    const session = {}; // To replace with Session Model
+
+    // Send the session ID back to the matching service
+    const messageBody = JSON.stringify({ session._id });
+    await producer.send({
+        topic: COLLAB_TOPIC,
+        messages: [
+            {
+                key: matchId,
+                value: messageBody,
+            },
+        ],
+    });
+
+    console.log(`Sent Session ID ${session._id} to collab service.`);
+}

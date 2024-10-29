@@ -1,6 +1,8 @@
 import questionModel from "../models/Question";
 import categoryModel from "../models/Category";
 import { Request, Response, NextFunction } from "express";
+import { EachMessagePayload } from "kafkajs";
+import { producer, QUESTION_TOPIC } from "../utils/kafkaClient";
 
 export async function getAllQuestions(
     request: Request,
@@ -59,11 +61,11 @@ export async function createQuestion(
 
         await newQuestion.save();
 
-        const populatedQuestion = await newQuestion.populate("categories")
+        const populatedQuestion = await newQuestion.populate("categories");
 
         res.status(201).json({
             message: `New question ${code}: ${title} created.`,
-            question: populatedQuestion
+            question: populatedQuestion,
         });
     } catch (error) {
         next(error);
@@ -80,10 +82,13 @@ export async function updateQuestion(
 
     try {
         if (updateData.title) {
-            const existingTitle = await questionModel.findOne({ title: updateData.title, _id: { $ne: id } });
+            const existingTitle = await questionModel.findOne({
+                title: updateData.title,
+                _id: { $ne: id },
+            });
             if (existingTitle) {
                 return response.status(400).json({
-                    message: "A question with the given title already exists."
+                    message: "A question with the given title already exists.",
                 });
             }
         }
@@ -135,7 +140,9 @@ export async function deleteQuestion(
     const { id } = request.params;
 
     try {
-        const deletedQuestion = await questionModel.findOneAndDelete({ _id: id });
+        const deletedQuestion = await questionModel.findOneAndDelete({
+            _id: id,
+        });
 
         if (!deletedQuestion) {
             return response.status(404).json({
@@ -171,5 +178,52 @@ export async function getQuestion(
         response.status(200).json(populatedQuestion);
     } catch (error) {
         next(error);
+    }
+}
+
+/**
+ * Process the message from the Kafka topic and get a suitable question with same category and same difficulty (if possible).
+ * Sends the question ID back to the matching service.
+ * @param message - Kafka message payload
+ */
+export async function getSuitableQuestion(message: EachMessagePayload) {
+    const body = message.message.value?.toString();
+    const matchId = message.message.key?.toString();
+
+    if (!body || !matchId) {
+        console.error("No message body or Match ID found.");
+        return;
+    }
+
+    const { category, difficulty } = JSON.parse(body);
+
+    try {
+        const question = await questionModel
+            .findOne({ categories: category, difficulty })
+            .populate("categories");
+
+        if (!question) {
+            console.log(
+                `No question found for category: ${category}, difficulty: ${difficulty}`
+            );
+            return;
+        }
+
+        const questionId = question._id.toString();
+        const messageBody = JSON.stringify({ questionId });
+
+        await producer.send({
+            topic: QUESTION_TOPIC,
+            messages: [
+                {
+                    key: matchId,
+                    value: messageBody,
+                },
+            ],
+        });
+
+        console.log(`Sent question ID ${questionId} to collab service.`);
+    } catch (error) {
+        console.error("Error getting suitable question:", error);
     }
 }
