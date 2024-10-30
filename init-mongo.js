@@ -4,6 +4,7 @@ const MONGO_INITDB_ROOT_USERNAME = "admin";
 const MONGO_INITDB_ROOT_PASSWORD = "password";
 const PEERPREP_QUESTION_INITDB_NAME = "peerprepQuestionServiceDB";
 // const PEERPREP_USER_INITDB_NAME = "peerprepUserServiceDB";
+// const PEERPREP_COLLAB_INITDB_NAME = "peerprepCollabServiceDB";
 
 db.getSiblingDB("admin").auth(MONGO_INITDB_ROOT_USERNAME, MONGO_INITDB_ROOT_PASSWORD);
 
