@@ -6,8 +6,11 @@ import http from "http";
 import { WebSocket } from "ws";
 import collaborationRoutes from "./routes/collaborationRoutes";
 import { errorHandler } from "./middlewares/errorHandler";
+import { connectToDatabase } from "./utils/database";
 
 dotenv.config({ path: path.resolve(__dirname, "./.env") });
+
+connectToDatabase();
 
 const port = process.env.PORT || 3004;
 const app: Express = express();

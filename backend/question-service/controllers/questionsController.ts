@@ -4,6 +4,8 @@ import { Request, Response, NextFunction } from "express";
 import { EachMessagePayload } from "kafkajs";
 import { producer, QUESTION_TOPIC } from "../utils/kafkaClient";
 
+const DIFFICULTIES = ["easy", "medium", "hard"];
+
 export async function getAllQuestions(
     request: Request,
     response: Response,
@@ -198,19 +200,14 @@ export async function getSuitableQuestion(message: EachMessagePayload) {
     const { category, difficulty } = JSON.parse(body);
 
     try {
-        const question = await questionModel
-            .findOne({ categories: category, difficulty })
-            .populate("categories");
-
+        const question = await findSuitableQuestion(category, difficulty);
         if (!question) {
-            console.log(
-                `No question found for category: ${category}, difficulty: ${difficulty}`
-            );
-            return;
+            throw new Error("No suitable question found.");
         }
 
-        const questionId = question._id.toString();
-        const messageBody = JSON.stringify({ questionId });
+        const messageBody = JSON.stringify({
+            question: question._id.toString(),
+        });
 
         await producer.send({
             topic: QUESTION_TOPIC,
@@ -221,9 +218,57 @@ export async function getSuitableQuestion(message: EachMessagePayload) {
                 },
             ],
         });
-
-        console.log(`Sent question ID ${questionId} to collab service.`);
     } catch (error) {
-        console.error("Error getting suitable question:", error);
+        console.error("Error finding suitable question:", error);
+    }
+}
+
+async function findSuitableQuestion(categoryName: string, difficulty: string) {
+    try {
+        const category = await categoryModel.findOne({ name: categoryName });
+
+        if (!category) {
+            throw new Error(`Category '${categoryName}' not found.`);
+        }
+
+        let question = await questionModel.findOne({
+            categories: category._id,
+            difficulty: difficulty,
+        });
+
+        if (question) {
+            return question;
+        }
+
+        const difficultyIndex = DIFFICULTIES.indexOf(difficulty);
+        if (difficultyIndex === -1) {
+            throw new Error(`Invalid difficulty level: ${difficulty}`);
+        }
+
+        // Find lower difficulty question if not found
+        for (let i = difficultyIndex - 1; i >= 0; i--) {
+            question = await questionModel.findOne({
+                categories: category._id,
+                difficulty: DIFFICULTIES[i],
+            });
+            if (question) {
+                return question;
+            }
+        }
+
+        // Find higher difficulty question if not found
+        for (let i = difficultyIndex + 1; i < DIFFICULTIES.length; i++) {
+            question = await questionModel.findOne({
+                categories: category._id,
+                difficulty: DIFFICULTIES[i],
+            });
+            if (question) {
+                return question;
+            }
+        }
+
+        return null;
+    } catch (error) {
+        console.error("Error finding suitable question:", error);
     }
 }

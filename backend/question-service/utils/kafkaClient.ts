@@ -1,9 +1,12 @@
 import { getSuitableQuestion } from "controllers/questionsController";
 import { Kafka } from "kafkajs";
 
+const HOST = process.env.KAFKA_HOST || "localhost";
+const PORT = process.env.KAFKA_PORT || "9092";
+
 const kafka = new Kafka({
     clientId: "question-service",
-    brokers: ["localhost:9092"],
+    brokers: [`${HOST}:${PORT}`],
 });
 
 export const MATCH_TOPIC = "match_topic";

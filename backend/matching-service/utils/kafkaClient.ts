@@ -1,9 +1,12 @@
 import { Kafka } from 'kafkajs';
 import { handleCollabMessage, handleQuestionMessage } from '../workers/matchWorker';
 
+const HOST = process.env.KAFKA_HOST || "localhost";
+const PORT = process.env.KAFKA_PORT || "9092";
+
 const kafka = new Kafka({
-  clientId: 'matching-service',
-  brokers: ['localhost:9092'],
+    clientId: "matching-service",
+    brokers: [`${HOST}:${PORT}`],
 });
 
 export const producer = kafka.producer();
