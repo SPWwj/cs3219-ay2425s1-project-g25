@@ -17,6 +17,9 @@ async function initKafka() {
     await consumer.connect();
 }
 
+/**
+ * Listens for messages from matching-service for successful matches.
+ */
 export async function setUpKafkaSubscribers() {
     await initKafka();
 
