@@ -74,13 +74,12 @@ services:
         ports:
             - "3004:3004"
         volumes:
-            - ./backend/matching-service:/app
+            - ./backend/collaboration-service:/app
             - /app/node_modules
         env_file:
-            - ./backend/matching-service/.env
+            - ./backend/collaboration-service/.env
         environment:
             DB_HOST: peerprep-mongodb # Override localhost
-            REDIS_HOST: peerprep-redis # Override localhost
             KAFKA_HOST: peerprep-kafka # Override localhost
         depends_on:
             - peerprep-mongodb

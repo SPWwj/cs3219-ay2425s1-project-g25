@@ -9,6 +9,7 @@ import redisClient, {
 import { decodeToken } from "../utils/tokenUtils";
 import { startStaleUserCleanup } from "../workers/staleUserCleaner";
 import { isValidSocketId } from "../utils/helpers";
+import { Socket } from "socket.io";
 
 // -------------------------------------REST FUNCTIONS-------------------------------------------
 export async function startMatching(
@@ -80,7 +81,7 @@ export async function cancelMatch(
 export function setupSocketListeners() {
     const io = getSocket();
 
-    io.on(SOCKET_EVENTS.CONNECT, (socket) => {
+    io.on(SOCKET_EVENTS.CONNECT, (socket: Socket) => {
         socket.on(
             SOCKET_EVENTS.START_MATCHING,
             async (requestData: { category: string; difficulty: string }) => {
@@ -133,7 +134,7 @@ export function setupSocketListeners() {
                     category: category,
                     difficulty: difficulty,
                 };
-                redisClient.hSet(userKey, userData);
+                await redisClient.hSet(userKey, userData);
                 console.log("User data saved:", { userKey, userData });
 
                 await redisClient

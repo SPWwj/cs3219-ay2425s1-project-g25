@@ -1,4 +1,4 @@
-import { getSuitableQuestion } from "controllers/questionsController";
+import { getSuitableQuestion } from "../controllers/questionsController";
 import { Kafka } from "kafkajs";
 
 const HOST = process.env.KAFKA_HOST || "localhost";
